@@ -13,3 +13,4 @@ if __name__ == '__main__':
     top_level_logger.info('ready')
     subcomponent_logger.debug('initialising')
     subcomponent_logger.debug('ready')
+    subcomponent_logger.debug("NOT READY")

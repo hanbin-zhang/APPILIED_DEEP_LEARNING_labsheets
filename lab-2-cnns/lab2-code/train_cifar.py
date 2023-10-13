@@ -104,17 +104,17 @@ def main(args):
 
     model = CNN(height=32, width=32, channels=3, class_count=10)
 
-    ## TASK 8: Redefine the criterion to be softmax cross entropy
-    criterion = lambda logits, labels: torch.tensor(0)
+    # TASK 8: Redefine the criterion to be softmax cross entropy
+    criterion = nn.CrossEntropyLoss()
 
-    ## TASK 11: Define the optimizer
-    optimizer = None
+    # TASK 11: Define the optimizer
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.05)
 
     log_dir = get_summary_writer_log_dir(args)
     print(f"Writing logs to {log_dir}")
     summary_writer = SummaryWriter(
-            str(log_dir),
-            flush_secs=5
+        str(log_dir),
+        flush_secs=5
     )
     trainer = Trainer(
         model, train_loader, test_loader, criterion, optimizer, summary_writer, DEVICE
@@ -144,20 +144,38 @@ class CNN(nn.Module):
         )
         self.initialise_layer(self.conv1)
         self.pool1 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
-        ## TASK 2-1: Define the second convolutional layer and initialise its parameters
-        ## TASK 3-1: Define the second pooling layer
-        ## TASK 5-1: Define the first FC layer and initialise its parameters
-        ## TASK 6-1: Define the last FC layer and initialise its parameters
+
+        # TASK 2-1: Define the second convolutional layer and initialise its parameters
+        self.conv2 = nn.Conv2d(
+            in_channels=self.conv1.out_channels,
+            out_channels=64,
+            kernel_size=(5, 5),
+            padding=(2, 2),
+        )
+        self.initialise_layer(self.conv2)
+        # TASK 3-1: Define the second pooling layer
+        self.pool2 = nn.MaxPool2d(kernel_size=(2, 2), stride=(2, 2))
+        # TASK 5-1: Define the first FC layer and initialise its parameters
+        self.fc1 = nn.Linear(4096, 1024)
+        self.initialise_layer(self.fc1)
+        # TASK 6-1: Define the last FC layer and initialise its parameters
+        self.fc2 = nn.Linear(self.fc1.out_features, 10)
+        self.initialise_layer(self.fc2)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         x = F.relu(self.conv1(images))
         x = self.pool1(x)
-        ## TASK 2-2: Pass x through the second convolutional layer
-        ## TASK 3-2: Pass x through the second pooling layer
-        ## TASK 4: Flatten the output of the pooling layer so it is of shape
-        ##         (batch_size, 4096)
-        ## TASK 5-2: Pass x through the first fully connected layer
-        ## TASK 6-2: Pass x through the last fully connected layer
+        # TASK 2-2: Pass x through the second convolutional layer
+        x = F.relu(self.conv2(x))
+        # TASK 3-2: Pass x through the second pooling layer
+        x = self.pool2(x)
+        # TASK 4: Flatten the output of the pooling layer so it is of shape
+        #         (batch_size, 4096)
+        x = torch.flatten(x, start_dim=1)
+        # TASK 5-2: Pass x through the first fully connected layer
+        x = F.relu(self.fc1(x))
+        # TASK 6-2: Pass x through the last fully connected layer
+        x = self.fc2(x)
         return x
 
     @staticmethod
@@ -170,14 +188,14 @@ class CNN(nn.Module):
 
 class Trainer:
     def __init__(
-        self,
-        model: nn.Module,
-        train_loader: DataLoader,
-        val_loader: DataLoader,
-        criterion: nn.Module,
-        optimizer: Optimizer,
-        summary_writer: SummaryWriter,
-        device: torch.device,
+            self,
+            model: nn.Module,
+            train_loader: DataLoader,
+            val_loader: DataLoader,
+            criterion: nn.Module,
+            optimizer: Optimizer,
+            summary_writer: SummaryWriter,
+            device: torch.device,
     ):
         self.model = model.to(device)
         self.device = device
@@ -189,12 +207,12 @@ class Trainer:
         self.step = 0
 
     def train(
-        self,
-        epochs: int,
-        val_frequency: int,
-        print_frequency: int = 20,
-        log_frequency: int = 5,
-        start_epoch: int = 0
+            self,
+            epochs: int,
+            val_frequency: int,
+            print_frequency: int = 20,
+            log_frequency: int = 5,
+            start_epoch: int = 0
     ):
         self.model.train()
         for epoch in range(start_epoch, epochs):
@@ -205,21 +223,26 @@ class Trainer:
                 labels = labels.to(self.device)
                 data_load_end_time = time.time()
 
+                # TASK 1: Compute the forward pass of the model, print the output shape
+                #         and quit the program
+                # output = self.model.forward(batch)
+                # print(output.shape)
+                # import sys
+                # sys.exit(1)
 
-                ## TASK 1: Compute the forward pass of the model, print the output shape
-                ##         and quit the program
-                #output =
+                # TASK 7: Rename `output` to `logits`, remove the output shape printing
+                #         and get rid of the `import sys; sys.exit(1)`
+                logits = self.model.forward(batch)
 
-                ## TASK 7: Rename `output` to `logits`, remove the output shape printing
-                ##         and get rid of the `import sys; sys.exit(1)`
+                # TASK 9: Compute the loss using self.criterion and
+                #         store it in a variable called `loss`
+                loss = self.criterion(logits,  labels)
 
-                ## TASK 9: Compute the loss using self.criterion and
-                ##         store it in a variable called `loss`
-                loss = torch.tensor(0)
-
-                ## TASK 10: Compute the backward pass
-
-                ## TASK 12: Step the optimizer and then zero out the gradient buffers.
+                # TASK 10: Compute the backward pass
+                loss.backward()
+                # TASK 12: Step the optimizer and then zero out the gradient buffers.
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
                 with torch.no_grad():
                     preds = logits.argmax(-1)
@@ -245,32 +268,32 @@ class Trainer:
     def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
         epoch_step = self.step % len(self.train_loader)
         print(
-                f"epoch: [{epoch}], "
-                f"step: [{epoch_step}/{len(self.train_loader)}], "
-                f"batch loss: {loss:.5f}, "
-                f"batch accuracy: {accuracy * 100:2.2f}, "
-                f"data load time: "
-                f"{data_load_time:.5f}, "
-                f"step time: {step_time:.5f}"
+            f"epoch: [{epoch}], "
+            f"step: [{epoch_step}/{len(self.train_loader)}], "
+            f"batch loss: {loss:.5f}, "
+            f"batch accuracy: {accuracy * 100:2.2f}, "
+            f"data load time: "
+            f"{data_load_time:.5f}, "
+            f"step time: {step_time:.5f}"
         )
 
     def log_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
         self.summary_writer.add_scalar("epoch", epoch, self.step)
         self.summary_writer.add_scalars(
-                "accuracy",
-                {"train": accuracy},
-                self.step
+            "accuracy",
+            {"train": accuracy},
+            self.step
         )
         self.summary_writer.add_scalars(
-                "loss",
-                {"train": float(loss.item())},
-                self.step
+            "loss",
+            {"train": float(loss.item())},
+            self.step
         )
         self.summary_writer.add_scalar(
-                "time/data", data_load_time, self.step
+            "time/data", data_load_time, self.step
         )
         self.summary_writer.add_scalar(
-                "time/data", step_time, self.step
+            "time/data", step_time, self.step
         )
 
     def validate(self):
@@ -296,20 +319,20 @@ class Trainer:
         average_loss = total_loss / len(self.val_loader)
 
         self.summary_writer.add_scalars(
-                "accuracy",
-                {"test": accuracy},
-                self.step
+            "accuracy",
+            {"test": accuracy},
+            self.step
         )
         self.summary_writer.add_scalars(
-                "loss",
-                {"test": average_loss},
-                self.step
+            "loss",
+            {"test": average_loss},
+            self.step
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
 
 def compute_accuracy(
-    labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
+        labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
 ) -> float:
     """
     Args:

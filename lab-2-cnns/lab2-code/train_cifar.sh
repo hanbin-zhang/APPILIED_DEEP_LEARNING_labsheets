@@ -15,4 +15,4 @@ module purge
 # load in the module dependencies for this script
 module load "languages/anaconda3/2021-3.8.8-cuda-11.1-pytorch"
 
-python train_cifar.py
+python train_cifar.py --learning-rate 5e-2

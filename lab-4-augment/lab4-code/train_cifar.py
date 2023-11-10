@@ -17,6 +17,8 @@ from torchvision import transforms
 import argparse
 from pathlib import Path
 
+import torchvision
+
 torch.backends.cudnn.benchmark = True
 
 parser = argparse.ArgumentParser(
@@ -64,12 +66,31 @@ parser.add_argument(
     type=int,
     help="Number of worker processes used to load data.",
 )
-
 parser.add_argument(
     "--sgd-momentum",
     default=0,
     type=float,
     help="Value of SGD momentum")
+parser.add_argument(
+    "--data-aug-hflip",
+    dest="is_hflip",
+    action="store_true",
+    help="add data aug horizontal flip")
+parser.add_argument(
+    "--data-aug-brightness",
+    default=0,
+    type=float,
+    help="value of data aug brightness")
+parser.add_argument(
+    "--data-aug-rotation",
+    default=0,
+    type=int,
+    help="value of data aug rotation")
+parser.add_argument(
+    "--dropout",
+    default=0,
+    type=float,
+    help="value of drop out how many neuron")
 
 
 class ImageShape(NamedTuple):
@@ -85,13 +106,20 @@ else:
 
 
 def main(args):
-    transform = transforms.ToTensor()
+    transforms_to_compose = [transforms.ToTensor(),
+                             transforms.ColorJitter(brightness=args.data_aug_brightness),
+                             transforms.RandomRotation(args.data_aug_rotation)]
+
+    if args.is_hflip:
+        transforms_to_compose.append(transforms.RandomHorizontalFlip())
+
+    transform = transforms.Compose(transforms_to_compose)
     args.dataset_root.mkdir(parents=True, exist_ok=True)
     train_dataset = torchvision.datasets.CIFAR10(
         args.dataset_root, train=True, download=True, transform=transform
     )
     test_dataset = torchvision.datasets.CIFAR10(
-        args.dataset_root, train=False, download=False, transform=transform
+        args.dataset_root, train=False, download=False, transform=transforms.ToTensor()
     )
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -108,7 +136,7 @@ def main(args):
         pin_memory=True,
     )
 
-    model = CNN(height=32, width=32, channels=3, class_count=10)
+    model = CNN(height=32, width=32, channels=3, class_count=10, dropout=args.dropout)
 
     # TASK 8: Redefine the criterion to be softmax cross entropy
     criterion = nn.CrossEntropyLoss()
@@ -137,7 +165,7 @@ def main(args):
 
 
 class CNN(nn.Module):
-    def __init__(self, height: int, width: int, channels: int, class_count: int):
+    def __init__(self, height: int, width: int, channels: int, class_count: int, dropout: float):
         super().__init__()
         self.input_shape = ImageShape(height=height, width=width, channels=channels)
         self.class_count = class_count
@@ -172,6 +200,8 @@ class CNN(nn.Module):
 
         self.initialise_layer(self.fc2)
 
+        self.dropout = nn.Dropout(p=dropout)
+
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         x = F.relu(self.batchNorm2d1(self.conv1(images)))
         x = self.pool1(x)
@@ -183,9 +213,9 @@ class CNN(nn.Module):
         #         (batch_size, 4096)
         x = torch.flatten(x, start_dim=1)
         # TASK 5-2: Pass x through the first fully connected layer
-        x = F.relu(self.batchNorm1d1(self.fc1(x)))
+        x = F.relu(self.batchNorm1d1(self.fc1(self.dropout(x))))
         # TASK 6-2: Pass x through the last fully connected layer
-        x = self.fc2(x)
+        x = self.fc2(self.dropout(x))
         return x
 
     @staticmethod
@@ -246,7 +276,7 @@ class Trainer:
 
                 # TASK 9: Compute the loss using self.criterion and
                 #         store it in a variable called `loss`
-                loss = self.criterion(logits,  labels)
+                loss = self.criterion(logits, labels)
 
                 # TASK 10: Compute the backward pass
                 loss.backward()
@@ -273,6 +303,7 @@ class Trainer:
                 self.validate()
                 # self.validate() will put the model in validation mode,
                 # so we have to switch back to train mode afterwards
+
                 self.model.train()
 
     def print_metrics(self, epoch, accuracy, loss, data_load_time, step_time):
@@ -340,6 +371,31 @@ class Trainer:
         )
         print(f"validation loss: {average_loss:.5f}, accuracy: {accuracy * 100:2.2f}")
 
+        print(print(per_class_accuracy(np.array(results["preds"]), np.array(results["labels"]))))
+
+
+def per_class_accuracy(test, target):
+    unique_classes = np.unique(target)  # Get unique class labels from the target array
+    class_accuracies = {}  # Dictionary to store per-class accuracies
+
+    for class_label in unique_classes:
+        # Create masks for elements belonging to the current class in both test and target arrays
+        test_mask = (test == class_label)
+        target_mask = (target == class_label)
+
+        # Calculate the number of correct predictions for the current class
+        correct_predictions = np.sum(test_mask & target_mask)
+
+        # Calculate the total number of instances of the current class in the target array
+        total_instances = np.sum(target_mask)
+
+        # Calculate the accuracy for the current class
+        accuracy = correct_predictions / total_instances
+
+        class_accuracies[class_label] = accuracy
+
+    return class_accuracies
+
 
 def compute_accuracy(
         labels: Union[torch.Tensor, np.ndarray], preds: Union[torch.Tensor, np.ndarray]
@@ -365,7 +421,17 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
         from getting logged to the same TB log directory (which you can't easily
         untangle in TB).
     """
-    tb_log_dir_prefix = f'CNN_bn_bs={args.batch_size}_lr={args.learning_rate}_momentum={args.sgd_momentum}_run_'
+    tb_log_dir_prefix = (
+            f"CNN_bn_"
+            f"dropout={args.dropout}_"
+            f"bs={args.batch_size}_"
+            f"lr={args.learning_rate}_"
+            f"momentum=0.9_"
+            f"brightness={args.data_aug_brightness}_" +
+            f"rotation_range={args.data_aug_rotation}_" +
+            ("hflip_" if args.is_hflip else "") +
+            f"run_"
+    )
     i = 0
     while i < 1000:
         tb_log_dir = args.log_dir / (tb_log_dir_prefix + str(i))
@@ -376,5 +442,4 @@ def get_summary_writer_log_dir(args: argparse.Namespace) -> str:
 
 
 if __name__ == "__main__":
-
     main(parser.parse_args())
